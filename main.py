@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Nifty Bot is Live! ✅"
+    return "Nifty Bot is Live! OK"
 
 def run_web():
     app.run(host='0.0.0.0', port=10000)
@@ -49,11 +49,15 @@ def check_once():
             df.loc[(df["ema20"] > df["ema50"]) & (df["ema20"].shift(1) <= df["ema50"].shift(1)), "cross"] = 1
             df.loc[(df["ema20"] < df["ema50"]) & (df["ema20"].shift(1) >= df["ema50"].shift(1)), "cross"] = -1
             spot = float(df["Close"].iloc[-1])
-            if spot < float(df["ema200"].iloc[-1]):
+            ema200 = float(df["ema200"].iloc[-1])
+            rsi = float(df["rsi"].iloc[-1])
+            vol = float(df["Volume"].iloc[-1])
+            vavg = float(df["vol_avg"].iloc[-1])
+            if spot < ema200:
                 continue
-            if not (50 <= float(df["rsi"].iloc[-1]) <= 72):
+            if not (50 <= rsi <= 72):
                 continue
-            if float(df["Volume"].iloc[-1]) < float(df["vol_avg"].iloc[-1]) * 1.3:
+            if vol < vavg * 1.3:
                 continue
             win = df.iloc[:-1]
             crosses = win[win["cross"] != 0].tail(3)
@@ -69,28 +73,24 @@ def check_once():
             LOW = float(seg["Low"].min())
             HIGH = float(seg["High"].max())
             RANGE = HIGH - LOW
-            if RANGE <= 0 or RANGE > HIGH * 0.04 or RANGE < HIGH * 0.012:
+            if RANGE <= 0:
                 continue
-            if spot <= LOW * 1.01 and spot >= LOW * 0.985:
-                send_alert(f"{sym.replace('.NS','')} CE BUY\nSpot:{spot:.0f} LOW:{LOW:.0f}\nTarget +25% SL -12%\nTime:{now.strftime('%H:%M')}")
-        except:
+            if RANGE > HIGH * 0.04:
+                continue
+            if RANGE < HIGH * 0.012:
+                continue
+            if spot > LOW * 1.01:
+                continue
+            if spot < LOW * 0.985:
+                continue
+            send_alert(f"{sym.replace('.NS','')} CE BUY Spot:{spot:.0f} LOW:{LOW:.0f} Target +25% SL -12% Time:{now.strftime('%H:%M')}")
+        except Exception as e:
             continue
 
-send_alert("✅ Bot Started on Render - 24x7 Live")
+send_alert("BOT STARTED ON RENDER - 24x7 LIVE")
 
 while True:
     now = datetime.now(pytz.timezone('Asia/Kolkata'))
     if now.weekday() < 5 and 9 <= now.hour < 16:
         check_once()
-    time.sleep(300)   if RANGE<=0 or RANGE>HIGH*0.04 or RANGE<HIGH*0.012: continue
-   if spot<=LOW*1.01 and spot>=LOW*0.985:
-    send_alert(f"{sym.replace('.NS','')} CE BUY\nSpot:{spot:.0f} LOW:{LOW:.0f}\nTarget +25% SL -12%\nTime:{now.strftime('%H:%M')}")
-  except: continue
-
-send_alert("✅ Bot Started on Render - 24x7 Live")
-
-while True:
- now=datetime.now(pytz.timezone('Asia/Kolkata'))
- if now.weekday()<5 and 9<=now.hour<16: check_once()
- time.sleep(300) if now.weekday()<5 and 9<=now.hour<16: check_once()
- time.sleep(300)
+    time.sleep(300)
