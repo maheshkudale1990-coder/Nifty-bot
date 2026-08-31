@@ -1,11 +1,22 @@
-import yfinance as yf, pandas as pd, requests, time
+import yfinance as yf, pandas as pd, requests, time, threading
 from datetime import datetime
 import pytz
+from flask import Flask
+
+# --- Flask for Render Web Service ---
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Nifty Bot is Live! ✅"
+def run_web(): app.run(host='0.0.0.0', port=10000)
+threading.Thread(target=run_web).start()
+
 TOPIC="nifty-best30-pune-123"
 BEST_30=["HEROMOTOCO.NS","BAJAJ-AUTO.NS","ULTRACEMCO.NS","DRREDDY.NS","JSWSTEEL.NS","SUNPHARMA.NS","APOLLOHOSP.NS","MARUTI.NS","KOTAKBANK.NS","SHRIRAMFIN.NS","ADANIENT.NS","GRASIM.NS","ETERNAL.NS","ASIANPAINT.NS","LT.NS","AXISBANK.NS","SBIN.NS","TITAN.NS","TRENT.NS","SBILIFE.NS","ICICIBANK.NS","JIOFIN.NS","COALINDIA.NS","NTPC.NS","BEL.NS","ONGC.NS","BAJAJFINSV.NS","ADANIPORTS.NS","BAJFINANCE.NS","EICHERMOT.NS"]
+
 def send_alert(msg):
  try: requests.post(f"https://ntfy.sh/{TOPIC}",data=msg.encode('utf-8'),headers={"Title":"NIFTY BUY SIGNAL","Priority":"high"})
  except: pass
+
 def check_once():
  ist=pytz.timezone('Asia/Kolkata'); now=datetime.now(ist)
  for sym in BEST_30:
@@ -31,8 +42,11 @@ def check_once():
    if spot<=LOW*1.01 and spot>=LOW*0.985:
     send_alert(f"{sym.replace('.NS','')} CE BUY\nSpot:{spot:.0f} LOW:{LOW:.0f}\nTarget +25% SL -12%\nTime:{now.strftime('%H:%M')}")
   except: continue
+
 send_alert("✅ Bot Started on Render - 24x7 Live")
+
 while True:
  now=datetime.now(pytz.timezone('Asia/Kolkata'))
  if now.weekday()<5 and 9<=now.hour<16: check_once()
+ time.sleep(300) if now.weekday()<5 and 9<=now.hour<16: check_once()
  time.sleep(300)
