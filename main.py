@@ -11,9 +11,12 @@ app = Flask(__name__)
 TOPIC = "nifty-best30-pune-123"
 BEST_30 = ["HEROMOTOCO.NS","BAJAJ-AUTO.NS","ULTRACEMCO.NS","DRREDDY.NS","JSWSTEEL.NS","SUNPHARMA.NS","APOLLOHOSP.NS","MARUTI.NS","KOTAKBANK.NS","SHRIRAMFIN.NS","ADANIENT.NS","GRASIM.NS","ETERNAL.NS","ASIANPAINT.NS","LT.NS","AXISBANK.NS","SBIN.NS","TITAN.NS","TRENT.NS","SBILIFE.NS","ICICIBANK.NS","JIOFIN.NS","COALINDIA.NS","NTPC.NS","BEL.NS","ONGC.NS","BAJAJFINSV.NS","ADANIPORTS.NS","BAJFINANCE.NS","EICHERMOT.NS"]
 
+# --- हे नवीन टाकलं - एकदाच सिग्नल येण्यासाठी ---
+SENT_TODAY = {} 
+
 @app.route('/')
 def home():
-    return "Nifty Bot is Live! OK"
+    return "Nifty Bot is Live! OK - SINGLE SIGNAL FIX"
 
 def send_alert(msg):
     print(f"SENDING: {msg}", flush=True)
@@ -25,6 +28,7 @@ def send_alert(msg):
 def check_once():
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.now(ist)
+    today_key = now.strftime('%Y-%m-%d')
     print(f"--- Checking at {now.strftime('%H:%M:%S')} ---", flush=True)
     for sym in BEST_30:
         try:
@@ -49,44 +53,53 @@ def check_once():
             rsi = float(df["rsi"].iloc[-1])
             vol = float(df["Volume"].iloc[-1])
             vavg = float(df["vol_avg"].iloc[-1])
-            if spot < ema200:
-                continue
-            if not (50 <= rsi <= 72):
-                continue
-            if vol < vavg * 1.3:
-                continue
+            if spot < ema200: continue
+            if not (50 <= rsi <= 72): continue
+            if vol < vavg * 1.3: continue
             win = df.iloc[:-1]
             crosses = win[win["cross"] != 0].tail(3)
-            if len(crosses) < 2:
-                continue
+            if len(crosses) < 2: continue
             last = crosses.iloc[-1]
             prev = crosses.iloc[-2]
-            if last["cross"] != -1:
-                continue
+            if last["cross"] != -1: continue
             seg = win.loc[prev.name:last.name]
-            if len(seg) < 10:
-                continue
+            if len(seg) < 10: continue
             LOW = float(seg["Low"].min())
             HIGH = float(seg["High"].max())
             RANGE = HIGH - LOW
-            if RANGE <= 0:
+            if RANGE <= 0: continue
+            if RANGE > HIGH * 0.04: continue
+            if RANGE < HIGH * 0.012: continue
+
+            # --- FIX 1: Entry अगदी LOW लाच पाहिजे ---
+            # आधी 1% वरपर्यंत घेत होतास, आता फक्त 0.3% वरपर्यंत
+            if spot > LOW * 1.003: # 1918 असेल तर फक्त 1923 पर्यंतच घेणार
                 continue
-            if RANGE > HIGH * 0.04:
+            if spot < LOW * 0.997: # 1918 च्या खाली गेला तर सोडून देणार
                 continue
-            if RANGE < HIGH * 0.012:
-                continue
-            if spot > LOW * 1.01:
-                continue
-            if spot < LOW * 0.985:
-                continue
-            send_alert(f"{sym.replace('.NS','')} CE BUY Spot:{spot:.0f} LOW:{LOW:.0f} Target +25% SL -12% Time:{now.strftime('%H:%M')}")
-        except Exception:
+
+            # --- FIX 2: एकदाच सिग्नल ---
+            signal_id = f"{sym}_{today_key}_{int(LOW)}"
+            if signal_id in SENT_TODAY:
+                continue # आज हाच Signal आधीच दिलाय, परत नाही द्यायचा
+            
+            # तुझी मागणी - Entry 118.3 ला पाहिजे म्हणजे LOW ला
+            msg = f"{sym.replace('.NS','')} CE BUY\nEntry:{LOW:.1f} Spot:{spot:.0f}\nLOW:{LOW:.0f} Target +25% SL -12%\nTime:{now.strftime('%H:%M')}"
+            send_alert(msg)
+            SENT_TODAY[signal_id] = True
+            print(f"ALERT SENT & LOCKED: {signal_id}", flush=True)
+
+        except Exception as e:
+            print(f"Error {sym}: {e}", flush=True)
             continue
 
 def algo_loop():
-    send_alert("BOT STARTED ON RENDER - 24x7 LIVE - FINAL FIX")
+    global SENT_TODAY
+    send_alert("BOT RESTARTED - SINGLE SIGNAL FIX LIVE")
     while True:
         now = datetime.now(pytz.timezone('Asia/Kolkata'))
+        if now.hour == 9 and now.minute < 5: # रोज सकाळी 9 वाजता List Clear
+            SENT_TODAY.clear()
         if now.weekday() < 5 and 9 <= now.hour < 16:
             check_once()
         else:
