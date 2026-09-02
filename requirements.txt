@@ -1,5 +1,7 @@
+Flask
 yfinance
 pandas
 requests
 pytz
-Flask
+lxml
+gunicorn
