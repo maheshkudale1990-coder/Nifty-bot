@@ -15,7 +15,7 @@ def send_alert2(msg):
 FNO = ["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS"]
 
 def run_ema_range_strategy():
-    print("EMA Range Strategy Started", flush=True)
+    print("EMA Range Strategy Started with 200 EMA Filter", flush=True)
     while True:
         try:
             for sym in FNO:
@@ -24,29 +24,33 @@ def run_ema_range_strategy():
                 if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
                 df["ema20"] = df["Close"].ewm(span=20).mean()
                 df["ema50"] = df["Close"].ewm(span=50).mean()
+                df["ema200"] = df["Close"].ewm(span=200).mean() # NAVIN FILTER
                 df["cross"] = 0
                 df.loc[(df["ema20"] > df["ema50"]) & (df["ema20"].shift(1) <= df["ema50"].shift(1)), "cross"] = 1
                 df.loc[(df["ema20"] < df["ema50"]) & (df["ema20"].shift(1) >= df["ema50"].shift(1)), "cross"] = -1
                 spot = float(df["Close"].iloc[-1])
+                ema200 = float(df["ema200"].iloc[-1])
+
+                # 200 EMA FILTER - Pahili strategy sarkha
+                if spot < ema200:
+                    continue
+
                 win = df.iloc[:-1]
                 crosses = win[win["cross"] != 0].tail(3)
                 if len(crosses) < 3: continue
                 last, prev, prev2 = crosses.iloc[-1], crosses.iloc[-2], crosses.iloc[-3]
-                # HIGH = Death pasun magcha Golden paryantcha High
                 if last["cross"] == -1:
                     high_period = win.loc[prev.name:last.name]
                     HIGH = float(high_period["High"].max())
                     low_period = win.loc[prev2.name:prev.name]
                     LOW = float(low_period["Low"].min())
                 else: continue
-                # Condition: HIGH varun LOW la aali
                 if spot <= LOW * 1.01 and spot >= LOW * 0.99:
                     RANGE = HIGH - LOW
-                    # Tuzi condition: 1.2% to 4%
                     if RANGE < HIGH*0.012 or RANGE > HIGH*0.04: continue
-                    profit_price = HIGH  # 25% kinva HIGH
-                    sl_price = spot * 0.88 # 12% loss
-                    msg = f"{sym.replace('.NS','')} CALL BUY\nLOW Touch {spot:.0f}\nHIGH {HIGH:.0f} LOW {LOW:.0f}\nTGT {profit_price:.0f} (+25%) SL {sl_price:.0f} (-12%)\nTime {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M')}"
+                    profit_price = HIGH
+                    sl_price = spot * 0.88
+                    msg = f"{sym.replace('.NS','')} CALL BUY\nLOW Touch {spot:.0f} > EMA200 {ema200:.0f}\nHIGH {HIGH:.0f} LOW {LOW:.0f}\nTGT {profit_price:.0f} SL {sl_price:.0f}\nTime {datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M')}"
                     send_alert2(msg)
                     print(msg, flush=True)
             time.sleep(300)
