@@ -54,3 +54,35 @@ def ema_range_strategy():
                         if curr_price <= entry_buffer and curr_price >= low_level * 0.99:
                             tgt = high_level
                             sl = low_level * 0.88
+                            clean_stock = stock.replace(".NS","")
+                            pct_tgt = ((tgt - curr_price) / curr_price) * 100
+
+                            msg = f"{clean_stock} CALL BUY\nPrice {curr_price:.0f} | LOW+0.3% {entry_buffer:.0f}\nHIGH {high_level:.0f} LOW {low_level:.0f}\nTGT {tgt:.0f} (+{pct_tgt:.0f}%) SL {sl:.0f}"
+                            print(msg)
+                            send_ntfy(f"{clean_stock} BUY", msg)
+                            time.sleep(2)
+                except Exception as inner_e:
+                    print(f"{stock} Error: {inner_e}")
+                    continue
+
+            print(f"--- Scan Done at {datetime.now().strftime('%H:%M:%S')} ---")
+            time.sleep(300)
+
+        except Exception as e:
+            print(f"Main Loop Error: {e}")
+            time.sleep(60)
+
+# Flask App - Render साठी
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return f"BOT LIVE - 25 STOCKS - Last Scan {datetime.now().strftime('%H:%M:%S')}"
+
+# Bot Thread Start
+bot_thread = threading.Thread(target=ema_range_strategy, daemon=True)
+bot_thread.start()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
