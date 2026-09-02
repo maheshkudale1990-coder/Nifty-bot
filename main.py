@@ -6,8 +6,8 @@ import requests
 import threading
 
 # CONFIG
-NTFY_TOPIC = "TUMCHA_TOPIC_TAKA"  # ithe tuza ntfy topic
-STOCKS = ["ICICIBANK.NS", "HDFCBANK.NS", "RELIANCE.NS", "TCS.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "KOTAKBANK.NS"] # F&O list add kar
+NTFY_TOPIC = "nifty-bot-mahesh-1990"  # TUZA KHARA TOPIC ITHA TAK
+STOCKS = ["ICICIBANK.NS", "HDFCBANK.NS", "RELIANCE.NS", "TCS.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "KOTAKBANK.NS"]
 
 def send_ntfy(title, msg):
     try:
@@ -23,7 +23,7 @@ def ema_range_strategy():
     while True:
         try:
             for stock in STOCKS:
-                df = yf.download(stock, period="5d", interval="5m", progress=False)
+                df = yf.download(stock, period="5d", interval="5m", progress=False, auto_adjust=True)
                 if len(df) < 200:
                     continue
                 
@@ -32,23 +32,21 @@ def ema_range_strategy():
                 df['LOW'] = df['Low'].rolling(20).min()
                 
                 last = df.iloc[-1]
-                prev = df.iloc[-2]
                 
-                curr_price = last['Close']
-                high_level = last['HIGH']
-                low_level = last['LOW']
-                ema200 = last['EMA200']
+                curr_price = float(last['Close'])
+                high_level = float(last['HIGH'])
+                low_level = float(last['LOW'])
+                ema200 = float(last['EMA200'])
                 
-                # LOW + 0.3% CALCULATION
-                entry_buffer = low_level * 1.003  # 0.3% var
+                # LOW + 0.3% ENTRY LOGIC
+                entry_buffer = low_level * 1.003
                 
-                # FILTER: Price > 200 EMA (Uptrend madhech Call Buy)
+                # FILTER: Price > 200 EMA
                 if curr_price > ema200:
-                    # ENTRY: LOW + 0.3% TOUCH
-                    if curr_price <= entry_buffer and curr_price >= low_level * 0.995:
+                    # ENTRY: agdi low la nahi, 0.3% varch entry
+                    if curr_price <= entry_buffer and curr_price >= low_level * 0.99:
                         tgt = high_level
-                        sl = low_level * 0.88  # -12%
-                        
+                        sl = low_level * 0.88
                         clean_stock = stock.replace(".NS","")
                         pct_tgt = ((tgt - curr_price) / curr_price) * 100
                         
@@ -57,24 +55,22 @@ def ema_range_strategy():
                         send_ntfy(f"{clean_stock} BUY", msg)
 
             print(f"--- Checking at {datetime.now().strftime('%H:%M:%S')} ---")
-            time.sleep(300)  # 5 min
+            time.sleep(300)
 
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(60)
 
-# THREAD START
 bot_thread = threading.Thread(target=ema_range_strategy, daemon=True)
 bot_thread.start()
 print("Bot Thread Started for Gunicorn - 2 Strategies - LOW 0.3%")
 
-# Flask App for Render
 from flask import Flask
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "BOT LIVE - EMA + RANGE + LOW0.3%"
+    return "BOT LIVE - EMA + RANGE + LOW 0.3%"
 
 if __name__ == '__main__':
     app.run()
