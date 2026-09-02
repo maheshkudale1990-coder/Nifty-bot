@@ -6,12 +6,13 @@ import threading
 from datetime import datetime
 import pytz
 from flask import Flask
+import gc
 
 app = Flask(__name__)
+
 TOPIC = "nifty-best30-pune-123"
 BEST_30 = ["HEROMOTOCO.NS","BAJAJ-AUTO.NS","ULTRACEMCO.NS","DRREDDY.NS","JSWSTEEL.NS","SUNPHARMA.NS","APOLLOHOSP.NS","MARUTI.NS","KOTAKBANK.NS","SHRIRAMFIN.NS","ADANIENT.NS","GRASIM.NS","ETERNAL.NS","ASIANPAINT.NS","LT.NS","AXISBANK.NS","SBIN.NS","TITAN.NS","TRENT.NS","SBILIFE.NS","ICICIBANK.NS","JIOFIN.NS","COALINDIA.NS","NTPC.NS","BEL.NS","ONGC.NS","BAJAJFINSV.NS","ADANIPORTS.NS","BAJFINANCE.NS","EICHERMOT.NS"]
 
-# --- हे नवीन टाकलं - एकदाच सिग्नल येण्यासाठी ---
 SENT_TODAY = {} 
 
 @app.route('/')
@@ -32,7 +33,7 @@ def check_once():
     print(f"--- Checking at {now.strftime('%H:%M:%S')} ---", flush=True)
     for sym in BEST_30:
         try:
-            df = yf.download(sym, period="10d", interval="5m", progress=False, auto_adjust=True)
+            df = yf.download(sym, period="10d", interval="5m", progress=False, auto_adjust=True, threads=False)
             if df.empty or len(df) < 200:
                 continue
             if isinstance(df.columns, pd.MultiIndex):
@@ -70,20 +71,13 @@ def check_once():
             if RANGE <= 0: continue
             if RANGE > HIGH * 0.04: continue
             if RANGE < HIGH * 0.012: continue
-
-            # --- FIX 1: Entry अगदी LOW लाच पाहिजे ---
-            # आधी 1% वरपर्यंत घेत होतास, आता फक्त 0.3% वरपर्यंत
-            if spot > LOW * 1.003: # 1918 असेल तर फक्त 1923 पर्यंतच घेणार
-                continue
-            if spot < LOW * 0.997: # 1918 च्या खाली गेला तर सोडून देणार
-                continue
-
-            # --- FIX 2: एकदाच सिग्नल ---
+            if spot > LOW * 1.003: continue
+            if spot < LOW * 0.997: continue
+            
             signal_id = f"{sym}_{today_key}_{int(LOW)}"
             if signal_id in SENT_TODAY:
-                continue # आज हाच Signal आधीच दिलाय, परत नाही द्यायचा
+                continue
             
-            # तुझी मागणी - Entry 118.3 ला पाहिजे म्हणजे LOW ला
             msg = f"{sym.replace('.NS','')} CE BUY\nEntry:{LOW:.1f} Spot:{spot:.0f}\nLOW:{LOW:.0f} Target +25% SL -12%\nTime:{now.strftime('%H:%M')}"
             send_alert(msg)
             SENT_TODAY[signal_id] = True
@@ -92,21 +86,29 @@ def check_once():
         except Exception as e:
             print(f"Error {sym}: {e}", flush=True)
             continue
+    gc.collect()
 
 def algo_loop():
     global SENT_TODAY
-    send_alert("BOT RESTARTED - SINGLE SIGNAL FIX LIVE")
+    send_alert("BOT RESTARTED - FINAL FIX LIVE")
+    print("Algo Loop Started Successfully!", flush=True)
     while True:
-        now = datetime.now(pytz.timezone('Asia/Kolkata'))
-        if now.hour == 9 and now.minute < 5: # रोज सकाळी 9 वाजता List Clear
-            SENT_TODAY.clear()
-        if now.weekday() < 5 and 9 <= now.hour < 16:
-            check_once()
-        else:
-            print(f"Market Closed {now.strftime('%H:%M')}", flush=True)
-        time.sleep(300)
+        try:
+            now = datetime.now(pytz.timezone('Asia/Kolkata'))
+            if now.hour == 9 and now.minute < 5:
+                SENT_TODAY.clear()
+                print("SENT_TODAY Cleared for new day", flush=True)
+            if now.weekday() < 5 and 9 <= now.hour < 16:
+                check_once()
+            else:
+                print(f"Market Closed {now.strftime('%H:%M')}", flush=True)
+            time.sleep(300)
+        except Exception as e:
+            print(f"Loop Error: {e}", flush=True)
+            time.sleep(60)
 
-threading.Thread(target=algo_loop, daemon=True).start()
+# --- HA MAIN FIX AHE ---
+print("Starting Bot Thread...", flush=True)
+threading.Thread(target=algo_loop, daemon=False).start()
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+app.run(host='0.0.0.0', port=10000)
