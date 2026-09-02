@@ -1,94 +1,80 @@
 import yfinance as yf
 import pandas as pd
-import requests
 import time
-import threading
 from datetime import datetime
-import pytz
-from flask import Flask
-import gc
-# NAVIN STRATEGY IMPORT
-from ema_range_strategy import run_ema_range_strategy
+import requests
+import threading
 
+# CONFIG
+NTFY_TOPIC = "TUMCHA_TOPIC_TAKA"  # ithe tuza ntfy topic
+STOCKS = ["ICICIBANK.NS", "HDFCBANK.NS", "RELIANCE.NS", "TCS.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "KOTAKBANK.NS"] # F&O list add kar
+
+def send_ntfy(title, msg):
+    try:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode('utf-8'), headers={"Title": title})
+        print(f"SENDING: {msg}")
+    except Exception as e:
+        print(e)
+
+def ema_range_strategy():
+    print("EMA Range Strategy Started with 200 EMA Filter - LOW+0.3% ENTRY")
+    send_ntfy("BOT RESTARTED", "BOT RESTARTED - BOTH STRATEGIES LIVE - LOW+0.3%")
+    
+    while True:
+        try:
+            for stock in STOCKS:
+                df = yf.download(stock, period="5d", interval="5m", progress=False)
+                if len(df) < 200:
+                    continue
+                
+                df['EMA200'] = df['Close'].ewm(span=200).mean()
+                df['HIGH'] = df['High'].rolling(20).max()
+                df['LOW'] = df['Low'].rolling(20).min()
+                
+                last = df.iloc[-1]
+                prev = df.iloc[-2]
+                
+                curr_price = last['Close']
+                high_level = last['HIGH']
+                low_level = last['LOW']
+                ema200 = last['EMA200']
+                
+                # LOW + 0.3% CALCULATION
+                entry_buffer = low_level * 1.003  # 0.3% var
+                
+                # FILTER: Price > 200 EMA (Uptrend madhech Call Buy)
+                if curr_price > ema200:
+                    # ENTRY: LOW + 0.3% TOUCH
+                    if curr_price <= entry_buffer and curr_price >= low_level * 0.995:
+                        tgt = high_level
+                        sl = low_level * 0.88  # -12%
+                        
+                        clean_stock = stock.replace(".NS","")
+                        pct_tgt = ((tgt - curr_price) / curr_price) * 100
+                        
+                        msg = f"{clean_stock} CALL BUY\nLOW+0.3% Touch {curr_price:.0f}\nHIGH {high_level:.0f} LOW {low_level:.0f}\nTGT {tgt:.0f} (+{pct_tgt:.0f}%) SL {sl:.0f} (-12%)"
+                        print(msg)
+                        send_ntfy(f"{clean_stock} BUY", msg)
+
+            print(f"--- Checking at {datetime.now().strftime('%H:%M:%S')} ---")
+            time.sleep(300)  # 5 min
+
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(60)
+
+# THREAD START
+bot_thread = threading.Thread(target=ema_range_strategy, daemon=True)
+bot_thread.start()
+print("Bot Thread Started for Gunicorn - 2 Strategies - LOW 0.3%")
+
+# Flask App for Render
+from flask import Flask
 app = Flask(__name__)
-TOPIC = "nifty-best30-pune-123"
-BEST_30 = ["HEROMOTOCO.NS","BAJAJ-AUTO.NS","ULTRACEMCO.NS","DRREDDY.NS","JSWSTEEL.NS","SUNPHARMA.NS","APOLLOHOSP.NS","MARUTI.NS","KOTAKBANK.NS","SHRIRAMFIN.NS","ADANIENT.NS","GRASIM.NS","ETERNAL.NS","ASIANPAINT.NS","LT.NS","AXISBANK.NS","SBIN.NS","TITAN.NS","TRENT.NS","SBILIFE.NS","ICICIBANK.NS","JIOFIN.NS","COALINDIA.NS","NTPC.NS","BEL.NS","ONGC.NS","BAJAJFINSV.NS","ADANIPORTS.NS","BAJFINANCE.NS","EICHERMOT.NS"]
-SENT_TODAY = {} 
 
 @app.route('/')
 def home():
-    return "Nifty Bot is Live! OK - Both Strategies Running"
+    return "BOT LIVE - EMA + RANGE + LOW0.3%"
 
-def send_alert(msg):
-    print(f"SENDING: {msg}", flush=True)
-    try:
-        requests.post(f"https://ntfy.sh/{TOPIC}", data=msg.encode('utf-8'), headers={"Title":"NIFTY BUY SIGNAL","Priority":"high"}, timeout=10)
-    except Exception as e:
-        print(f"NTFY Error: {e}", flush=True)
-
-def check_once():
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(ist)
-    today_key = now.strftime('%Y-%m-%d')
-    print(f"--- Checking at {now.strftime('%H:%M:%S')} ---", flush=True)
-    for sym in BEST_30:
-        try:
-            df = yf.download(sym, period="10d", interval="5m", progress=False, auto_adjust=True, threads=False)
-            if df.empty or len(df) < 200: continue
-            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-            df["ema20"] = df["Close"].ewm(span=20).mean()
-            df["ema50"] = df["Close"].ewm(span=50).mean()
-            df["ema200"] = df["Close"].ewm(span=200).mean()
-            df["vol_avg"] = df["Volume"].rolling(50).mean()
-            delta = df["Close"].diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            df["rsi"] = 100 - (100 / (1 + gain / loss))
-            df["cross"] = 0
-            df.loc[(df["ema20"] > df["ema50"]) & (df["ema20"].shift(1) <= df["ema50"].shift(1)), "cross"] = 1
-            df.loc[(df["ema20"] < df["ema50"]) & (df["ema20"].shift(1) >= df["ema50"].shift(1)), "cross"] = -1
-            spot = float(df["Close"].iloc[-1])
-            if spot < float(df["ema200"].iloc[-1]): continue
-            if not (50 <= float(df["rsi"].iloc[-1]) <= 72): continue
-            if float(df["Volume"].iloc[-1]) < float(df["vol_avg"].iloc[-1]) * 1.3: continue
-            win = df.iloc[:-1]
-            crosses = win[win["cross"] != 0].tail(3)
-            if len(crosses) < 2: continue
-            last = crosses.iloc[-1]
-            prev = crosses.iloc[-2]
-            if last["cross"] != -1: continue
-            seg = win.loc[prev.name:last.name]
-            if len(seg) < 10: continue
-            LOW = float(seg["Low"].min())
-            HIGH = float(seg["High"].max())
-            RANGE = HIGH - LOW
-            if RANGE <= 0 or RANGE > HIGH * 0.04 or RANGE < HIGH * 0.012: continue
-            if spot > LOW * 1.003 or spot < LOW * 0.997: continue
-            signal_id = f"{sym}_{today_key}_{int(LOW)}"
-            if signal_id in SENT_TODAY: continue
-            msg = f"{sym.replace('.NS','')} CE BUY\nEntry:{LOW:.1f} Spot:{spot:.0f}\nTime:{now.strftime('%H:%M')}"
-            send_alert(msg)
-            SENT_TODAY[signal_id] = True
-        except Exception as e:
-            continue
-    gc.collect()
-
-def algo_loop():
-    global SENT_TODAY
-    send_alert("BOT RESTARTED - BOTH STRATEGIES LIVE")
-    print("Algo Loop Started!", flush=True)
-    while True:
-        try:
-            now = datetime.now(pytz.timezone('Asia/Kolkata'))
-            if now.hour == 9 and now.minute < 5: SENT_TODAY.clear()
-            if now.weekday() < 5 and 9 <= now.hour < 16: check_once()
-            else: print(f"Market Closed {now.strftime('%H:%M')}", flush=True)
-            time.sleep(300)
-        except Exception as e:
-            print(f"Loop Error: {e}", flush=True)
-            time.sleep(60)
-
-threading.Thread(target=algo_loop, daemon=False).start()
-# DUSRI STRATEGY CHALU
-threading.Thread(target=run_ema_range_strategy, daemon=True).start()
-print("Bot Thread Started for Gunicorn - 2 Strategies", flush=True)
+if __name__ == '__main__':
+    app.run()
