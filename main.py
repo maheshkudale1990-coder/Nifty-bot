@@ -9,15 +9,13 @@ from flask import Flask
 import gc
 
 app = Flask(__name__)
-
 TOPIC = "nifty-best30-pune-123"
 BEST_30 = ["HEROMOTOCO.NS","BAJAJ-AUTO.NS","ULTRACEMCO.NS","DRREDDY.NS","JSWSTEEL.NS","SUNPHARMA.NS","APOLLOHOSP.NS","MARUTI.NS","KOTAKBANK.NS","SHRIRAMFIN.NS","ADANIENT.NS","GRASIM.NS","ETERNAL.NS","ASIANPAINT.NS","LT.NS","AXISBANK.NS","SBIN.NS","TITAN.NS","TRENT.NS","SBILIFE.NS","ICICIBANK.NS","JIOFIN.NS","COALINDIA.NS","NTPC.NS","BEL.NS","ONGC.NS","BAJAJFINSV.NS","ADANIPORTS.NS","BAJFINANCE.NS","EICHERMOT.NS"]
-
 SENT_TODAY = {} 
 
 @app.route('/')
 def home():
-    return "Nifty Bot is Live! OK - SINGLE SIGNAL FIX"
+    return "Nifty Bot is Live! OK"
 
 def send_alert(msg):
     print(f"SENDING: {msg}", flush=True)
@@ -34,10 +32,8 @@ def check_once():
     for sym in BEST_30:
         try:
             df = yf.download(sym, period="10d", interval="5m", progress=False, auto_adjust=True, threads=False)
-            if df.empty or len(df) < 200:
-                continue
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            if df.empty or len(df) < 200: continue
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
             df["ema20"] = df["Close"].ewm(span=20).mean()
             df["ema50"] = df["Close"].ewm(span=50).mean()
             df["ema200"] = df["Close"].ewm(span=200).mean()
@@ -50,13 +46,9 @@ def check_once():
             df.loc[(df["ema20"] > df["ema50"]) & (df["ema20"].shift(1) <= df["ema50"].shift(1)), "cross"] = 1
             df.loc[(df["ema20"] < df["ema50"]) & (df["ema20"].shift(1) >= df["ema50"].shift(1)), "cross"] = -1
             spot = float(df["Close"].iloc[-1])
-            ema200 = float(df["ema200"].iloc[-1])
-            rsi = float(df["rsi"].iloc[-1])
-            vol = float(df["Volume"].iloc[-1])
-            vavg = float(df["vol_avg"].iloc[-1])
-            if spot < ema200: continue
-            if not (50 <= rsi <= 72): continue
-            if vol < vavg * 1.3: continue
+            if spot < float(df["ema200"].iloc[-1]): continue
+            if not (50 <= float(df["rsi"].iloc[-1]) <= 72): continue
+            if float(df["Volume"].iloc[-1]) < float(df["vol_avg"].iloc[-1]) * 1.3: continue
             win = df.iloc[:-1]
             crosses = win[win["cross"] != 0].tail(3)
             if len(crosses) < 2: continue
@@ -68,47 +60,31 @@ def check_once():
             LOW = float(seg["Low"].min())
             HIGH = float(seg["High"].max())
             RANGE = HIGH - LOW
-            if RANGE <= 0: continue
-            if RANGE > HIGH * 0.04: continue
-            if RANGE < HIGH * 0.012: continue
-            if spot > LOW * 1.003: continue
-            if spot < LOW * 0.997: continue
-            
+            if RANGE <= 0 or RANGE > HIGH * 0.04 or RANGE < HIGH * 0.012: continue
+            if spot > LOW * 1.003 or spot < LOW * 0.997: continue
             signal_id = f"{sym}_{today_key}_{int(LOW)}"
-            if signal_id in SENT_TODAY:
-                continue
-            
-            msg = f"{sym.replace('.NS','')} CE BUY\nEntry:{LOW:.1f} Spot:{spot:.0f}\nLOW:{LOW:.0f} Target +25% SL -12%\nTime:{now.strftime('%H:%M')}"
+            if signal_id in SENT_TODAY: continue
+            msg = f"{sym.replace('.NS','')} CE BUY\nEntry:{LOW:.1f} Spot:{spot:.0f}\nTime:{now.strftime('%H:%M')}"
             send_alert(msg)
             SENT_TODAY[signal_id] = True
-            print(f"ALERT SENT & LOCKED: {signal_id}", flush=True)
-
         except Exception as e:
-            print(f"Error {sym}: {e}", flush=True)
             continue
     gc.collect()
 
 def algo_loop():
     global SENT_TODAY
-    send_alert("BOT RESTARTED - FINAL FIX LIVE")
-    print("Algo Loop Started Successfully!", flush=True)
+    send_alert("BOT RESTARTED - GUNICORN FIX LIVE")
+    print("Algo Loop Started!", flush=True)
     while True:
         try:
             now = datetime.now(pytz.timezone('Asia/Kolkata'))
-            if now.hour == 9 and now.minute < 5:
-                SENT_TODAY.clear()
-                print("SENT_TODAY Cleared for new day", flush=True)
-            if now.weekday() < 5 and 9 <= now.hour < 16:
-                check_once()
-            else:
-                print(f"Market Closed {now.strftime('%H:%M')}", flush=True)
+            if now.hour == 9 and now.minute < 5: SENT_TODAY.clear()
+            if now.weekday() < 5 and 9 <= now.hour < 16: check_once()
+            else: print(f"Market Closed {now.strftime('%H:%M')}", flush=True)
             time.sleep(300)
         except Exception as e:
             print(f"Loop Error: {e}", flush=True)
             time.sleep(60)
 
-# --- HA MAIN FIX AHE ---
-print("Starting Bot Thread...", flush=True)
 threading.Thread(target=algo_loop, daemon=False).start()
-
-app.run(host='0.0.0.0', port=10000)
+print("Bot Thread Started for Gunicorn", flush=True)
