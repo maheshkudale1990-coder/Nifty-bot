@@ -7,6 +7,8 @@ from datetime import datetime
 import pytz
 from flask import Flask
 import gc
+# NAVIN STRATEGY IMPORT
+from ema_range_strategy import run_ema_range_strategy
 
 app = Flask(__name__)
 TOPIC = "nifty-best30-pune-123"
@@ -15,7 +17,7 @@ SENT_TODAY = {}
 
 @app.route('/')
 def home():
-    return "Nifty Bot is Live! OK"
+    return "Nifty Bot is Live! OK - Both Strategies Running"
 
 def send_alert(msg):
     print(f"SENDING: {msg}", flush=True)
@@ -73,7 +75,7 @@ def check_once():
 
 def algo_loop():
     global SENT_TODAY
-    send_alert("BOT RESTARTED - GUNICORN FIX LIVE")
+    send_alert("BOT RESTARTED - BOTH STRATEGIES LIVE")
     print("Algo Loop Started!", flush=True)
     while True:
         try:
@@ -87,4 +89,6 @@ def algo_loop():
             time.sleep(60)
 
 threading.Thread(target=algo_loop, daemon=False).start()
-print("Bot Thread Started for Gunicorn", flush=True)
+# DUSRI STRATEGY CHALU
+threading.Thread(target=run_ema_range_strategy, daemon=True).start()
+print("Bot Thread Started for Gunicorn - 2 Strategies", flush=True)
