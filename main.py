@@ -4,108 +4,122 @@ import time
 from datetime import datetime
 import requests
 import threading
-import os
 import pytz
 import random
 
 NTFY_TOPIC = "nifty-bot-mahesh-1990"
-STOCKS = ["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","ITC.NS","LT.NS","BHARTIARTL.NS","AXISBANK.NS","BAJFINANCE.NS","MARUTI.NS","WIPRO.NS","TITAN.NS","SUNPHARMA.NS","NTPC.NS","POWERGRID.NS","HAL.NS","BEL.NS","ONGC.NS","COALINDIA.NS","ULTRACEMCO.NS","JSWSTEEL.NS"]
-
-last_scan_time = "Starting..."
 YOUR_URL = "https://nifty-bot-3757.onrender.com"
+last_scan_time = "Starting..."
+
+BAD_STOCKS = ['HINDPETRO','TATACONSUM','SIEMENS','SBICARD','BANDHANBNK','CUMMINSIND','ADANIPORTS','GAIL','BRITANNIA','NAUKRI','TECHM','INFY','COALINDIA','LICHSGFIN','SBILIFE','CIPLA','NTPC','ASIANPAINT','SRF','POWERGRID','TATACHEM','MARUTI','HDFCBANK','HDFCLIFE','BAJAJFINSV','OFSS','ADANIGREEN','VOLTAS','UPL','LTF','ABB','TATASTEEL','MPHASIS','HINDUNILVR','CANBK','PFC','MFSL','ADANIENSOL','ITC','ICICIGI','ADANIENT','ICICIPRULI','HDFCAMC','WIPRO','NMDC']
+
+FNO_STOCKS_ALL = ["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","ITC.NS","KOTAKBANK.NS","AXISBANK.NS","BAJFINANCE.NS","MARUTI.NS","ASIANPAINT.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","WIPRO.NS","ONGC.NS","NTPC.NS","ADANIENT.NS","ADANIPORTS.NS","COALINDIA.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","TATASTEEL.NS","BAJAJFINSV.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","CIPLA.NS","DIVISLAB.NS","SBILIFE.NS","HDFCLIFE.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HINDUNILVR.NS","NESTLEIND.NS","BRITANNIA.NS","TATACONSUM.NS","BPCL.NS","IOC.NS","HINDPETRO.NS","GAIL.NS","POWERGRID.NS","ADANIGREEN.NS","ADANIENSOL.NS","SIEMENS.NS","ABB.NS","HAVELLS.NS","VOLTAS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","INDUSINDBK.NS","BANDHANBNK.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","CANBK.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","BAJAJHLDNG.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","NMDC.NS","VEDL.NS","UPL.NS","PIIND.NS","SRF.NS","DEEPAKNTR.NS","TATACHEM.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","MPHASIS.NS","HCLTECH.NS","TECHM.NS","NAUKRI.NS","OFSS.NS","HDFCAMC.NS","ICICIPRULI.NS","ICICIGI.NS","SBICARD.NS","RECLTD.NS","PFC.NS","LICHSGFIN.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","LTF.NS","MFSL.NS","BHARATFORG.NS","CUMMINSIND.NS","HAL.NS","BHEL.NS"]
+
+STOCKS = [s for s in list(set(FNO_STOCKS_ALL)) if s.replace(".NS","") not in BAD_STOCKS]
+print(f"Final Bot Stocks: {len(STOCKS)}") # 81
 
 def send_ntfy(title, msg):
     try:
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode('utf-8'), headers={"Title": title, "Priority": "high"}, timeout=10)
         print(f"Sent: {title}", flush=True)
-    except Exception as e:
-        print(f"NTFY Fail {e}", flush=True)
+    except: pass
 
 def keep_alive():
     while True:
         time.sleep(240)
-        try:
-            requests.get(YOUR_URL, timeout=10)
-            print(f"Self Ping Done at {datetime.now().strftime('%H:%M:%S')}", flush=True)
+        try: requests.get(YOUR_URL, timeout=10)
         except: pass
+
+def check_signal(df):
+    try:
+        if len(df) < 250: return None
+        df["ema20"] = df["Close"].ewm(span=20).mean()
+        df["ema50"] = df["Close"].ewm(span=50).mean()
+        df["ema200"] = df["Close"].ewm(span=200).mean()
+        df["cross"] = 0
+        df.loc[(df["ema20"]>df["ema50"]) & (df["ema20"].shift(1)<=df["ema50"].shift(1)), "cross"]=1
+        df.loc[(df["ema20"]<df["ema50"]) & (df["ema20"].shift(1)>=df["ema50"].shift(1)), "cross"]=-1
+
+        i = len(df)-1
+        spot = float(df.iloc[i]["Close"])
+        ema200 = float(df.iloc[i]["ema200"])
+        if spot < ema200: return None
+
+        win = df.iloc[:i]
+        crosses = win[win["cross"]!=0].tail(3)
+        if len(crosses)<2: return None
+        last, prev = crosses.iloc[-1], crosses.iloc[-2]
+        if last["cross"]!= -1: return None
+
+        seg = win.loc[prev.name:last.name]
+        if seg.empty or len(seg) < 5: return None
+        HIGH = float(seg["High"].max())
+        LOW = float(seg["Low"].min())
+        RANGE = HIGH-LOW
+        if RANGE<=0 or RANGE>HIGH*0.08: return None
+
+        if spot <= LOW*1.01 and spot >= LOW*0.97:
+            tgt = HIGH
+            sl = LOW - RANGE*0.214
+            pct = ((tgt-spot)/spot)*100
+            return LOW, HIGH, tgt, sl, pct, RANGE
+    except: return None
+    return None
 
 def ema_range_strategy():
     global last_scan_time
-    print("BOT LIVE - SELF PING ENABLED", flush=True)
-    send_ntfy("BOT RESTARTED", f"BOT LIVE MARKET OPEN FIX - {datetime.now().strftime('%H:%M:%S')}")
+    print(f"BOT LIVE WITH 81 STOCKS STRATEGY", flush=True)
+    send_ntfy("BOT RESTARTED - 81 STOCKS", f"Original Strategy Live - {len(STOCKS)} stocks")
 
     while True:
         try:
             tz = pytz.timezone('Asia/Kolkata')
             now = datetime.now(tz)
-            if now.weekday() >= 5:
-                last_scan_time = f"Market Closed Weekend - {now.strftime('%H:%M:%S')}"
-                time.sleep(900)
-                continue
-
-            # Market 9:15 to 15:30
-            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-            market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+            if now.weekday() >=5:
+                time.sleep(600); continue
+            market_start = now.replace(hour=9, minute=15, second=0)
+            market_end = now.replace(hour=15, minute=30, second=0)
             if not (market_start <= now <= market_end):
-                last_scan_time = f"Market Closed - {now.strftime('%H:%M:%S %d/%m')}"
-                print(last_scan_time, flush=True)
-                time.sleep(300)
-                continue
+                last_scan_time = f"Market Closed - {now.strftime('%H:%M')}"
+                time.sleep(300); continue
 
-            last_scan_time = now.strftime('%H:%M:%S %d/%m/%y')
-            print(f"--- Scan Starting at {last_scan_time} ---", flush=True)
+            last_scan_time = now.strftime('%H:%M:%S %d/%m')
+            print(f"--- Scan {last_scan_time} ---", flush=True)
 
+            # Batch Download to avoid Rate Limit
             try:
                 tickers_str = " ".join(STOCKS)
-                data = yf.download(tickers_str, period="5d", interval="15m", group_by='ticker', progress=False, auto_adjust=True, threads=False)
-                print(f"Downloaded {len(STOCKS)} stocks", flush=True)
+                data = yf.download(tickers_str, period="20d", interval="15m", group_by='ticker', progress=False, auto_adjust=True, threads=False)
             except Exception as e:
-                print(f"Rate Limit: {e} - wait 5m", flush=True)
-                time.sleep(300)
-                continue
+                print(f"DL Fail {e}", flush=True)
+                time.sleep(300); continue
 
-            signals_found = 0
+            found=0
             for stock in STOCKS:
                 try:
-                    if stock not in data.columns.levels[0]:
-                        continue
+                    if stock not in data.columns.levels[0]: continue
                     df = data[stock].dropna()
-                    if len(df) < 50: # FIXED - 200 ऐवजी 50
-                        continue
-
-                    df['EMA200'] = df['Close'].ewm(span=200).mean()
-                    df['HIGH_20'] = df['High'].rolling(20).max()
-                    df['LOW_20'] = df['Low'].rolling(20).min()
-                    last = df.iloc[-1]
-                    curr_price = float(last['Close'])
-                    high_level = float(last['HIGH_20'])
-                    low_level = float(last['LOW_20'])
-                    ema200 = float(last['EMA200'])
-                    entry_buffer = low_level * 1.003
-
-                    if curr_price > ema200:
-                        if curr_price <= entry_buffer and curr_price >= low_level * 0.99:
-                            tgt = high_level
-                            sl = low_level * 0.88
-                            clean_stock = stock.replace(".NS","")
-                            pct_tgt = ((tgt - curr_price) / curr_price) * 100
-                            msg = f"{clean_stock} CALL BUY\nPrice {curr_price:.0f} | LOW+0.3% {entry_buffer:.0f}\nHIGH {high_level:.0f} LOW {low_level:.0f}\nTGT {tgt:.0f} (+{pct_tgt:.0f}%) SL {sl:.0f}\nTime {now.strftime('%H:%M')}"
-                            send_ntfy(f"{clean_stock} BUY", msg)
-                            signals_found += 1
-                            time.sleep(2)
+                    sig = check_signal(df)
+                    if sig:
+                        LOW,HIGH,tgt,sl,pct,RANGE = sig
+                        curr = float(df.iloc[-1]["Close"])
+                        clean = stock.replace(".NS","")
+                        msg = f"{clean} BUY\nPrice {curr:.0f} <= LOW*1.01\nLOW {LOW:.0f} HIGH {HIGH:.0f}\nRange {RANGE:.0f} ({RANGE/LOW*100:.1f}%)\nTGT {tgt:.0f} (+{pct:.0f}%) SL {sl:.0f}\nTime {now.strftime('%H:%M')}"
+                        send_ntfy(f"{clean} BUY", msg)
+                        found+=1
+                        time.sleep(2)
                 except: continue
 
-            print(f"--- Scan Done at {last_scan_time} | Signals: {signals_found} ---", flush=True)
-            time.sleep(300) # Market चालू आहे म्हणून 5 मिनिट
+            print(f"--- Done Signals: {found} ---", flush=True)
+            time.sleep(300 + random.randint(0,30))
         except Exception as e:
-            print(f"Loop Error: {e}", flush=True)
+            print(f"Loop Err {e}", flush=True)
             time.sleep(60)
 
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home():
-    return f"BOT LIVE - Last REAL Scan {last_scan_time} - Self Ping ON - MARKET OPEN MODE"
+def home(): return f"BOT LIVE 81 STOCKS - Last {last_scan_time}"
 
 threading.Thread(target=ema_range_strategy, daemon=True).start()
 threading.Thread(target=keep_alive, daemon=True).start()
