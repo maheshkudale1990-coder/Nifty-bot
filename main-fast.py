@@ -13,6 +13,22 @@ FNO_STOCKS = FNO_ALL
 RESULT_FILE = "results.json"
 NTFY_TOPIC = "nifty-fast-bot"
 
+# === फक्त हा नवीन भाग ADD केला ===
+SENT_TODAY_DATE = ""
+ALREADY_SENT = set()
+
+def check_already_sent(clean):
+    global SENT_TODAY_DATE, ALREADY_SENT
+    today = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y")
+    if SENT_TODAY_DATE!= today:
+        ALREADY_SENT = set()
+        SENT_TODAY_DATE = today
+    if clean in ALREADY_SENT:
+        return True
+    ALREADY_SENT.add(clean)
+    return False
+# =====================================
+
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
 
@@ -26,14 +42,14 @@ def send_ntfy(msg):
         print(f"Ntfy Error: {e}", flush=True)
 
 def get_batch_data(symbols_batch):
-    for attempt in range(3): # 3 वेळा Try करेल
+    for attempt in range(3):
         try:
             print(f"Checking BATCH {symbols_batch[0]} +{len(symbols_batch)-1} more... Attempt {attempt+1}", flush=True)
             data = yf.download(tickers=symbols_batch, period="5d", interval="5m", group_by='ticker', auto_adjust=True, threads=False, progress=False, session=y_session)
             return data
         except Exception as e:
             print(f"Batch Error: {e} - Waiting 60s", flush=True)
-            time.sleep(60) # Rate Limit आला तर 60 sec थांब
+            time.sleep(60)
     return pd.DataFrame()
 
 def check_strategy(df):
@@ -70,7 +86,7 @@ def background_scanner():
     while True:
         try:
             temp = []
-            chunk_size = 8 # FIXED - 8 is best
+            chunk_size = 8
             total_batches = (len(FNO_STOCKS)+chunk_size-1)//chunk_size
             for i in range(0, len(FNO_STOCKS), chunk_size):
                 batch = FNO_STOCKS[i:i+chunk_size]
@@ -90,16 +106,20 @@ def background_scanner():
                         sig = check_strategy(df)
                         if sig:
                             clean = sym.replace(".NS","")
+                            # === फक्त इथे Check ===
+                            if check_already_sent(clean):
+                                continue
                             msg = f"{clean} - {sig}"
                             if msg not in temp:
-                                temp.append(msg)
-                                print(f"FOUND: {msg}", flush=True)
-                                send_ntfy(msg)
+                                if clean not in [s.split(" -")[0] for s in temp]:
+                                    temp.append(msg)
+                                    print(f"FOUND: {msg}", flush=True)
+                                    send_ntfy(msg)
                     except: continue
                 last_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
                 save_results(temp, last_time)
                 print(f"Batch {i//chunk_size+1}/{total_batches} done - {len(temp)} signals, wait 25s", flush=True)
-                time.sleep(25) # FIXED - 25 sec
+                time.sleep(25)
             last_time = get_ist_time() + " IST (Full Done)"
             save_results(temp, last_time)
             print(f"Full Cycle Done: {len(temp)} signals - Restart in 60s", flush=True)
