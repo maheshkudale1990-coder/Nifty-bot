@@ -2,3 +2,4 @@ flask
 pandas
 yfinance
 curl_cffi
+gunicorn
