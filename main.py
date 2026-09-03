@@ -1,8 +1,7 @@
 from flask import Flask
 import pandas as pd
-import time, random, threading
+import time, random, threading, requests
 from datetime import datetime, timedelta
-from nsepython import nsefetch
 
 app = Flask(__name__)
 
@@ -19,23 +18,49 @@ is_scanning = False
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
 
+# Global session
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com/"
+})
+# get cookies once
+try:
+    session.get("https://www.nseindia.com", timeout=10)
+except: pass
+
 def get_nse_data_chunk(symbol_clean):
     try:
         print(f"Checking {symbol_clean}...", flush=True)
-        url = f"https://www.nseindia.com/api/chart-historical/intraday/equity?symbol={symbol_clean}"
-        data = nsefetch(url)
-        if not data or 'grapthData' not in data:
-            print(f"No Data {symbol_clean}", flush=True)
+        # Try 2 different NSE endpoints
+        urls = [
+            f"https://www.nseindia.com/api/chart-databyseries?index={symbol_clean}EQN",
+            f"https://www.nseindia.com/api/chart-historical/intraday/equity?symbol={symbol_clean}"
+        ]
+        data = None
+        for url in urls:
+            try:
+                r = session.get(url, timeout=10)
+                j = r.json()
+                if 'grapthData' in j and len(j['grapthData']) > 20:
+                    data = j['grapthData']
+                    break
+            except Exception as e:
+                continue
+        
+        if not data:
+            print(f"No Data {symbol_clean} - NSE blocked, will retry", flush=True)
+            # refresh cookies
+            try: session.get("https://www.nseindia.com", timeout=5)
+            except: pass
             return pd.DataFrame()
-        grapth = data['grapthData']
-        df = pd.DataFrame(grapth, columns=['ts','close'])
+
+        df = pd.DataFrame(data, columns=['ts','close'])
         df['ts'] = pd.to_datetime(df['ts'], unit='ms')
         df = df.set_index('ts')
         df_5m = df['close'].resample('5min').ohlc()
-        df_5m['Close'] = df_5m['close']
-        df_5m['High'] = df_5m['high']
-        df_5m['Low'] = df_5m['low']
-        df_5m['Open'] = df_5m['open']
+        df_5m.columns = ['Open','High','Low','Close']
         df_5m = df_5m.dropna().between_time('09:15','15:30')
         print(f"OK {symbol_clean} candles:{len(df_5m)}", flush=True)
         return df_5m.tail(600)
@@ -70,7 +95,7 @@ def check_strategy(df):
 
 def background_scanner():
     global results_store, last_scan_time, is_scanning
-    print("--- NSE SCANNER STARTED ---", flush=True)
+    print("--- NSE SCANNER STARTED V2 ---", flush=True)
     while True:
         try:
             is_scanning = True
@@ -85,7 +110,7 @@ def background_scanner():
                 if sig:
                     temp.append(f"{clean} - {sig}")
                     print(f"FOUND: {clean}", flush=True)
-                time.sleep(random.uniform(5, 8))
+                time.sleep(random.uniform(4, 7))
             results_store = temp
             last_scan_time = get_ist_time() + " IST"
             is_scanning = False
@@ -100,7 +125,7 @@ threading.Thread(target=background_scanner, daemon=True).start()
 @app.route('/')
 def home():
     status = "SCANNING NSE..." if is_scanning else "Sleep 10 min"
-    html = f"<h2>✅ NSE BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: {status}</p><p>Last Scan: {last_scan_time}</p><p>Data Source: NSE Direct (No Yahoo, No Dhan Fee)</p><hr><h3>Signals:</h3>"
+    html = f"<h2>✅ NSE BOT LIVE V2 - {len(FNO_STOCKS)} Stocks</h2><p>Status: {status}</p><p>Last Scan: {last_scan_time}</p><p>Data Source: NSE Direct Session</p><hr><h3>Signals:</h3>"
     if not results_store:
         html += "<p>No Signal Now - Scanning in background...</p>"
     else:
