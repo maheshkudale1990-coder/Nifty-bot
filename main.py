@@ -3,7 +3,6 @@ import pandas as pd
 import time, random, threading
 from datetime import datetime, timedelta
 from nsepython import nsefetch
-import requests
 
 app = Flask(__name__)
 
@@ -17,34 +16,31 @@ results_store = []
 last_scan_time = "Not Started"
 is_scanning = False
 
+def get_ist_time():
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
+
 def get_nse_data_chunk(symbol_clean):
-    """NSE कडून 5 दिवसाचा Data Chunk करून घेणे"""
     try:
-        # NSE intraday chart - 1 दिवसाचा data देतो, आपण 5 दिवस chunk करू
-        all_candles = []
-        # nsefetch auto cookie handle करतो
+        print(f"Checking {symbol_clean}...", flush=True)
         url = f"https://www.nseindia.com/api/chart-historical/intraday/equity?symbol={symbol_clean}"
         data = nsefetch(url)
-        # data['grapthData'] -> [[timestamp, price], ...] किंवा [o,h,l,c]
         if not data or 'grapthData' not in data:
+            print(f"No Data {symbol_clean}", flush=True)
             return pd.DataFrame()
-        
-        grapth = data['grapthData']  # [[168... , close], ...]
-        # काही वेळा हा फक्त close देतो, आपण त्याला OHLC बनवू
+        grapth = data['grapthData']
         df = pd.DataFrame(grapth, columns=['ts','close'])
         df['ts'] = pd.to_datetime(df['ts'], unit='ms')
         df = df.set_index('ts')
-        # 5min मध्ये resample - हाच Chunk Logic
-        df_5m = df['close'].resample('5T').ohlc()
+        df_5m = df['close'].resample('5min').ohlc()
         df_5m['Close'] = df_5m['close']
         df_5m['High'] = df_5m['high']
         df_5m['Low'] = df_5m['low']
         df_5m['Open'] = df_5m['open']
-        df_5m = df_5m.dropna()
-        df_5m = df_5m.between_time('09:15','15:30')
-        return df_5m.tail(600) # शेवटचे 600 candles ~ 5 दिवस
+        df_5m = df_5m.dropna().between_time('09:15','15:30')
+        print(f"OK {symbol_clean} candles:{len(df_5m)}", flush=True)
+        return df_5m.tail(600)
     except Exception as e:
-        print(f"NSE Error {symbol_clean}: {e}")
+        print(f"NSE Error {symbol_clean}: {e}", flush=True)
         return pd.DataFrame()
 
 def check_strategy(df):
@@ -55,10 +51,8 @@ def check_strategy(df):
     df["cross"] = 0
     df.loc[(df["ema20"]>df["ema50"]) & (df["ema20"].shift(1)<=df["ema50"].shift(1)), "cross"]=1
     df.loc[(df["ema20"]<df["ema50"]) & (df["ema20"].shift(1)>=df["ema50"].shift(1)), "cross"]=-1
-    
     spot = float(df["Close"].iloc[-1])
     if spot < float(df["ema200"].iloc[-1]): return None
-    
     win = df.iloc[:-1]
     crosses = win[win["cross"]!=0].tail(3)
     if len(crosses)<2: return None
@@ -76,34 +70,37 @@ def check_strategy(df):
 
 def background_scanner():
     global results_store, last_scan_time, is_scanning
-    print("--- NSE SCANNER STARTED ---")
+    print("--- NSE SCANNER STARTED ---", flush=True)
     while True:
-        is_scanning = True
-        temp = []
-        for sym in FNO_STOCKS:
-            clean = sym.replace(".NS","")
-            df = get_nse_data_chunk(clean)
-            if df.empty:
-                time.sleep(3)
-                continue
-            sig = check_strategy(df)
-            if sig:
-                temp.append(f"{clean} - {sig}")
-                print(f"FOUND: {clean}")
-            time.sleep(random.uniform(5, 8)) # NSE ला पण gap लागतो
-        
-        results_store = temp
-        last_scan_time = datetime.now().strftime("%d-%m %H:%M:%S")
-        is_scanning = False
-        print(f"Cycle Done: {len(temp)} signals. Sleep 10 min")
-        time.sleep(600)
+        try:
+            is_scanning = True
+            temp = []
+            for sym in FNO_STOCKS:
+                clean = sym.replace(".NS","")
+                df = get_nse_data_chunk(clean)
+                if df.empty:
+                    time.sleep(3)
+                    continue
+                sig = check_strategy(df)
+                if sig:
+                    temp.append(f"{clean} - {sig}")
+                    print(f"FOUND: {clean}", flush=True)
+                time.sleep(random.uniform(5, 8))
+            results_store = temp
+            last_scan_time = get_ist_time() + " IST"
+            is_scanning = False
+            print(f"Cycle Done: {len(temp)} signals at {last_scan_time}. Sleep 10 min", flush=True)
+            time.sleep(600)
+        except Exception as e:
+            print(f"Scanner Crash: {e}, restarting in 30 sec", flush=True)
+            time.sleep(30)
 
 threading.Thread(target=background_scanner, daemon=True).start()
 
 @app.route('/')
 def home():
     status = "SCANNING NSE..." if is_scanning else "Sleep 10 min"
-    html = f"<h2>✅ NSE BOT LIVE - {len(FNO_STOCKS)} Stocks (81 Filtered)</h2><p>Status: {status}</p><p>Last Scan: {last_scan_time}</p><p>Data Source: NSE Direct (No Yahoo, No Dhan Fee)</p><hr><h3>Signals:</h3>"
+    html = f"<h2>✅ NSE BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: {status}</p><p>Last Scan: {last_scan_time}</p><p>Data Source: NSE Direct (No Yahoo, No Dhan Fee)</p><hr><h3>Signals:</h3>"
     if not results_store:
         html += "<p>No Signal Now - Scanning in background...</p>"
     else:
