@@ -1,6 +1,6 @@
 from flask import Flask
 import pandas as pd
-import time, json, os, threading
+import time, json, os, threading, requests
 from datetime import datetime, timedelta
 import yfinance as yf
 from curl_cffi import requests as crequests
@@ -8,10 +8,18 @@ from curl_cffi import requests as crequests
 app = Flask(__name__)
 
 FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS","BAJFINANCE.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","ONGC.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","DIVISLAB.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HAVELLS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","VEDL.NS","PIIND.NS","DEEPAKNTR.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","HCLTECH.NS","RECLTD.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","BHARATFORG.NS","HAL.NS","BHEL.NS","BPCL.NS","IOC.NS","HINDPETRO.NS","TATACONSUM.NS","SIEMENS.NS","SBICARD.NS","BANDHANBNK.NS"]
-
 FNO_STOCKS = FNO_ALL
-
 RESULT_FILE = "results.json"
+
+# तुझा NTFY Topic
+NTFY_TOPIC = "nifty-bot-3757-signal"
+
+def send_ntfy(msg):
+    try:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode('utf-8'), headers={"Title": "NEW BUY SIGNAL!"}, timeout=10)
+        print(f"NTFY Sent: {msg}", flush=True)
+    except Exception as e:
+        print(f"NTFY Fail: {e}", flush=True)
 
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
@@ -57,7 +65,14 @@ def save_results(temp, last_time):
         json.dump({"signals": temp, "time": last_time}, f)
 
 def background_scanner():
-    print("--- FINAL 81 STRATEGY SCANNER STARTED ---", flush=True)
+    print("--- FINAL 81 STRATEGY SCANNER WITH NTFY STARTED ---", flush=True)
+    sent_signals = set()
+    if os.path.exists(RESULT_FILE):
+        try:
+            with open(RESULT_FILE, "r") as f:
+                old = json.load(f).get("signals", [])
+                for s in old: sent_signals.add(s.split(" - ")[0])
+        except: pass
     while True:
         try:
             temp = []
@@ -71,8 +86,7 @@ def background_scanner():
                     continue
                 for sym in batch:
                     try:
-                        if len(batch) == 1:
-                            df = batch_data
+                        if len(batch) == 1: df = batch_data
                         else:
                             if sym not in batch_data.columns.get_level_values(0): continue
                             df = batch_data[sym].dropna()
@@ -85,6 +99,9 @@ def background_scanner():
                             if msg not in temp:
                                 temp.append(msg)
                                 print(f"FOUND: {msg}", flush=True)
+                                if clean not in sent_signals:
+                                    send_ntfy(msg)
+                                    sent_signals.add(clean)
                     except: continue
                 last_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
                 save_results(temp, last_time)
@@ -110,7 +127,7 @@ def home():
     else:
         signals = []
         last_time = "Not Started - Scanning first batch..."
-    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: SCANNING...</p><p>Last Scan: {last_time}</p><p>Strategy: EMA 20/50 Cross + EMA200 + Range 8%</p><hr><h3>Signals:</h3>"
+    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: SCANNING...</p><p>Last Scan: {last_time}</p><p>Ntfy Topic: {NTFY_TOPIC}</p><p>Strategy: EMA 20/50 Cross + EMA200 + Range 8%</p><hr><h3>Signals:</h3>"
     if not signals:
         html += "<p>No Signal Now - Scanning...</p>"
     else:
