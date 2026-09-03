@@ -9,7 +9,6 @@ import pytz
 import random
 
 NTFY_TOPIC = "nifty-bot-mahesh-1990"
-# TATAMOTORS काढला, ADANIENT काढला - हेच Fail होत होते
 STOCKS = ["RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","SBIN.NS","ITC.NS","LT.NS","BHARTIARTL.NS","AXISBANK.NS","BAJFINANCE.NS","MARUTI.NS","WIPRO.NS","TITAN.NS","SUNPHARMA.NS","NTPC.NS","POWERGRID.NS","HAL.NS","BEL.NS","ONGC.NS","COALINDIA.NS","ULTRACEMCO.NS","JSWSTEEL.NS"]
 
 last_scan_time = "Starting..."
@@ -19,11 +18,12 @@ def send_ntfy(title, msg):
     try:
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode('utf-8'), headers={"Title": title, "Priority": "high"}, timeout=10)
         print(f"Sent: {title}", flush=True)
-    except: pass
+    except Exception as e:
+        print(f"NTFY Fail {e}", flush=True)
 
 def keep_alive():
     while True:
-        time.sleep(600) # 10 मिनिट
+        time.sleep(240)
         try:
             requests.get(YOUR_URL, timeout=10)
             print(f"Self Ping Done at {datetime.now().strftime('%H:%M:%S')}", flush=True)
@@ -32,38 +32,45 @@ def keep_alive():
 def ema_range_strategy():
     global last_scan_time
     print("BOT LIVE - SELF PING ENABLED", flush=True)
-    send_ntfy("BOT RESTARTED", f"BOT LIVE FIXED - RATE LIMIT GONE - {datetime.now().strftime('%H:%M:%S')}")
+    send_ntfy("BOT RESTARTED", f"BOT LIVE MARKET OPEN FIX - {datetime.now().strftime('%H:%M:%S')}")
 
     while True:
         try:
             tz = pytz.timezone('Asia/Kolkata')
             now = datetime.now(tz)
-            # Market Time Check 9:15 to 15:30 Mon-Fri
-            if now.weekday() >= 5 or not (9 <= now.hour < 16):
+            if now.weekday() >= 5:
+                last_scan_time = f"Market Closed Weekend - {now.strftime('%H:%M:%S')}"
+                time.sleep(900)
+                continue
+
+            # Market 9:15 to 15:30
+            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+            if not (market_start <= now <= market_end):
                 last_scan_time = f"Market Closed - {now.strftime('%H:%M:%S %d/%m')}"
                 print(last_scan_time, flush=True)
-                time.sleep(900)
+                time.sleep(300)
                 continue
 
             last_scan_time = now.strftime('%H:%M:%S %d/%m/%y')
             print(f"--- Scan Starting at {last_scan_time} ---", flush=True)
 
-            # === FIX 1: एका वेळी सगळे Stocks Download - 25 वेळा नाही ===
             try:
                 tickers_str = " ".join(STOCKS)
-                # threads=False आणि interval 15m ने Rate Limit येत नाही
                 data = yf.download(tickers_str, period="5d", interval="15m", group_by='ticker', progress=False, auto_adjust=True, threads=False)
+                print(f"Downloaded {len(STOCKS)} stocks", flush=True)
             except Exception as e:
-                print(f"Yahoo Rate Limit Hit: {e}, waiting 15 min", flush=True)
-                time.sleep(900)
+                print(f"Rate Limit: {e} - wait 5m", flush=True)
+                time.sleep(300)
                 continue
 
+            signals_found = 0
             for stock in STOCKS:
                 try:
                     if stock not in data.columns.levels[0]:
                         continue
                     df = data[stock].dropna()
-                    if len(df) < 200:
+                    if len(df) < 50: # FIXED - 200 ऐवजी 50
                         continue
 
                     df['EMA200'] = df['Close'].ewm(span=200).mean()
@@ -84,22 +91,21 @@ def ema_range_strategy():
                             pct_tgt = ((tgt - curr_price) / curr_price) * 100
                             msg = f"{clean_stock} CALL BUY\nPrice {curr_price:.0f} | LOW+0.3% {entry_buffer:.0f}\nHIGH {high_level:.0f} LOW {low_level:.0f}\nTGT {tgt:.0f} (+{pct_tgt:.0f}%) SL {sl:.0f}\nTime {now.strftime('%H:%M')}"
                             send_ntfy(f"{clean_stock} BUY", msg)
+                            signals_found += 1
                             time.sleep(2)
-                except Exception as inner_e:
-                    print(f"Skip {stock}: {inner_e}", flush=True)
-                    continue
+                except: continue
 
-            print(f"--- Scan Done at {last_scan_time} - Next in 15 min ---", flush=True)
-            time.sleep(900 + random.randint(0,60)) # 15-16 मिनिट
+            print(f"--- Scan Done at {last_scan_time} | Signals: {signals_found} ---", flush=True)
+            time.sleep(300) # Market चालू आहे म्हणून 5 मिनिट
         except Exception as e:
-            print(f"Main Loop Error: {e}", flush=True)
+            print(f"Loop Error: {e}", flush=True)
             time.sleep(60)
 
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return f"BOT LIVE - Last REAL Scan {last_scan_time} - Self Ping ON - FIXED"
+    return f"BOT LIVE - Last REAL Scan {last_scan_time} - Self Ping ON - MARKET OPEN MODE"
 
 threading.Thread(target=ema_range_strategy, daemon=True).start()
 threading.Thread(target=keep_alive, daemon=True).start()
