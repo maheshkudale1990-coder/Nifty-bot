@@ -1,20 +1,17 @@
 from flask import Flask
 import pandas as pd
-import time, random, threading
+import time, json, os, threading
 from datetime import datetime, timedelta
 import yfinance as yf
 from curl_cffi import requests as crequests
 
 app = Flask(__name__)
 
-# तुझे 81 Stocks Full List
 FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS","BAJFINANCE.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","ONGC.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","DIVISLAB.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HAVELLS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","VEDL.NS","PIIND.NS","DEEPAKNTR.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","HCLTECH.NS","RECLTD.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","BHARATFORG.NS","HAL.NS","BHEL.NS","BPCL.NS","IOC.NS","HINDPETRO.NS","TATACONSUM.NS","SIEMENS.NS","SBICARD.NS","BANDHANBNK.NS"]
 
-FNO_STOCKS = FNO_ALL # 81 Full Scan - No Filter
+FNO_STOCKS = FNO_ALL
 
-results_store = []
-last_scan_time = "Not Started"
-is_scanning = False
+RESULT_FILE = "results.json"
 
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
@@ -24,16 +21,7 @@ y_session = crequests.Session(impersonate="chrome110")
 def get_batch_data(symbols_batch):
     try:
         print(f"Checking BATCH {symbols_batch[0]} +{len(symbols_batch)-1} more...", flush=True)
-        data = yf.download(
-            tickers=symbols_batch,
-            period="5d",
-            interval="5m",
-            group_by='ticker',
-            auto_adjust=True,
-            threads=False,
-            progress=False,
-            session=y_session
-        )
+        data = yf.download(tickers=symbols_batch, period="5d", interval="5m", group_by='ticker', auto_adjust=True, threads=False, progress=False, session=y_session)
         return data
     except Exception as e:
         print(f"Batch Error: {e}", flush=True)
@@ -64,12 +52,14 @@ def check_strategy(df):
         return f"BUY Spot:{spot:.1f} Low:{LOW:.1f} High:{HIGH:.1f} Range:{RANGE:.1f}"
     return None
 
+def save_results(temp, last_time):
+    with open(RESULT_FILE, "w") as f:
+        json.dump({"signals": temp, "time": last_time}, f)
+
 def background_scanner():
-    global results_store, last_scan_time, is_scanning
     print("--- FINAL 81 STRATEGY SCANNER STARTED ---", flush=True)
     while True:
         try:
-            is_scanning = True
             temp = []
             chunk_size = 5
             total_batches = (len(FNO_STOCKS)+chunk_size-1)//chunk_size
@@ -84,8 +74,7 @@ def background_scanner():
                         if len(batch) == 1:
                             df = batch_data
                         else:
-                            if sym not in batch_data.columns.get_level_values(0):
-                                continue
+                            if sym not in batch_data.columns.get_level_values(0): continue
                             df = batch_data[sym].dropna()
                         if len(df) < 200: continue
                         df = df.between_time('09:15','15:30')
@@ -97,12 +86,12 @@ def background_scanner():
                                 temp.append(msg)
                                 print(f"FOUND: {msg}", flush=True)
                     except: continue
-                results_store = temp.copy()
-                last_scan_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
-                print(f"Batch {i//chunk_size+1}/{total_batches} done - Updated {len(temp)} signals, wait 90s", flush=True)
+                last_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
+                save_results(temp, last_time)
+                print(f"Batch {i//chunk_size+1}/{total_batches} done - Saved {len(temp)} signals, wait 90s", flush=True)
                 time.sleep(90)
-            is_scanning = False
-            last_scan_time = get_ist_time() + " IST (Full Done)"
+            last_time = get_ist_time() + " IST (Full Done)"
+            save_results(temp, last_time)
             print(f"Full Cycle Done: {len(temp)} signals", flush=True)
             time.sleep(600)
         except Exception as e:
@@ -113,12 +102,19 @@ threading.Thread(target=background_scanner, daemon=True).start()
 
 @app.route('/')
 def home():
-    status = "SCANNING..." if is_scanning else "Sleep 10 min"
-    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: {status}</p><p>Last Scan: {last_scan_time}</p><p>Strategy: EMA 20/50 Cross + EMA200 + Range 8%</p><hr><h3>Signals:</h3>"
-    if not results_store:
+    if os.path.exists(RESULT_FILE):
+        with open(RESULT_FILE, "r") as f:
+            data = json.load(f)
+            signals = data.get("signals", [])
+            last_time = data.get("time", "Not Started")
+    else:
+        signals = []
+        last_time = "Not Started - Scanning first batch..."
+    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: SCANNING...</p><p>Last Scan: {last_time}</p><p>Strategy: EMA 20/50 Cross + EMA200 + Range 8%</p><hr><h3>Signals:</h3>"
+    if not signals:
         html += "<p>No Signal Now - Scanning...</p>"
     else:
-        html += "<br>".join(results_store)
+        html += "<br>".join(signals)
     return html
 
 if __name__ == "__main__":
