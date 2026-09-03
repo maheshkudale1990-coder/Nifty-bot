@@ -1,6 +1,6 @@
 from flask import Flask
 import pandas as pd
-import time, json, os, threading
+import time, json, os, threading, requests
 from datetime import datetime, timedelta
 import yfinance as yf
 from curl_cffi import requests as crequests
@@ -11,11 +11,19 @@ FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS
 
 FNO_STOCKS = FNO_ALL
 RESULT_FILE = "results-fast.json"
+NTFY_TOPIC = "nifty-fast-bot" # Fast Bot चा Topic
 
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
 
 y_session = crequests.Session(impersonate="chrome110")
+
+def send_ntfy(msg):
+    try:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode('utf-8'), timeout=10)
+        print(f"Ntfy Sent: {msg}", flush=True)
+    except Exception as e:
+        print(f"Ntfy Error: {e}", flush=True)
 
 def get_batch_data(symbols_batch):
     try:
@@ -56,7 +64,7 @@ def save_results(temp, last_time):
         json.dump({"signals": temp, "time": last_time}, f)
 
 def background_scanner():
-    print("--- FAST SCANNER STARTED (5 Min Loop) ---", flush=True)
+    print("--- FAST SCANNER + NTFY STARTED ---", flush=True)
     while True:
         try:
             temp = []
@@ -84,6 +92,7 @@ def background_scanner():
                             if msg not in temp:
                                 temp.append(msg)
                                 print(f"FOUND: {msg}", flush=True)
+                                send_ntfy(msg)
                     except: continue
                 last_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
                 save_results(temp, last_time)
@@ -109,7 +118,7 @@ def home():
     else:
         signals = []
         last_time = "Not Started - Scanning first batch..."
-    html = f"<h2>✅ FAST BOT LIVE - {len(FNO_STOCKS)} Stocks (5 Min Loop)</h2><p>Last Scan: {last_time}</p><hr><h3>Signals:</h3>"
+    html = f"<h2>✅ FAST BOT LIVE + NTFY - {len(FNO_STOCKS)} Stocks</h2><p>Last Scan: {last_time}</p><p>Ntfy Topic: {NTFY_TOPIC}</p><hr><h3>Signals:</h3>"
     if not signals:
         html += "<p>No Signal Now - Scanning...</p>"
     else:
