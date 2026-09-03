@@ -7,12 +7,10 @@ from curl_cffi import requests as crequests
 
 app = Flask(__name__)
 
-# तुझे BAD Stocks
-BAD_STOCKS = ['HINDPETRO','TATACONSUM','SIEMENS','SBICARD','BANDHANBNK','CUMMINSIND','ADANIPORTS','GAIL','BRITANNIA','NAUKRI','TECHM','INFY','COALINDIA','LICHSGFIN','SBILIFE','CIPLA','NTPC','ASIANPAINT','SRF','POWERGRID','TATACHEM','MARUTI','HDFCBANK','HDFCLIFE','BAJAJFINSV','OFSS','ADANIGREEN','VOLTAS','UPL','LTF','ABB','TATASTEEL','MPHASIS','HINDUNILVR','CANBK','PFC','MFSL','ADANIENSOL','ITC','ICICIGI','ADANIENT','ICICIPRULI','HDFCAMC','WIPRO','NMDC']
+# तुझे 81 Stocks Full List
+FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS","BAJFINANCE.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","ONGC.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","DIVISLAB.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HAVELLS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","VEDL.NS","PIIND.NS","DEEPAKNTR.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","HCLTECH.NS","RECLTD.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","BHARATFORG.NS","HAL.NS","BHEL.NS","BPCL.NS","IOC.NS","HINDPETRO.NS","TATACONSUM.NS","SIEMENS.NS","SBICARD.NS","BANDHANBNK.NS"]
 
-FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS","BAJFINANCE.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","ONGC.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","DIVISLAB.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HAVELLS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","VEDL.NS","PIIND.NS","DEEPAKNTR.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","HCLTECH.NS","RECLTD.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","BHARATFORG.NS","HAL.NS","BHEL.NS","BPCL.NS","IOC.NS"]
-
-FNO_STOCKS = [s for s in FNO_ALL if s.replace(".NS","") not in BAD_STOCKS]
+FNO_STOCKS = FNO_ALL # 81 Full Scan - No Filter
 
 results_store = []
 last_scan_time = "Not Started"
@@ -21,7 +19,6 @@ is_scanning = False
 def get_ist_time():
     return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m %H:%M:%S")
 
-# Browser सारखं Session
 y_session = crequests.Session(impersonate="chrome110")
 
 def get_batch_data(symbols_batch):
@@ -43,7 +40,6 @@ def get_batch_data(symbols_batch):
         return pd.DataFrame()
 
 def check_strategy(df):
-    # हीच तुझी Strategy
     if len(df) < 200: return None
     df["ema20"] = df["Close"].ewm(span=20).mean()
     df["ema50"] = df["Close"].ewm(span=50).mean()
@@ -51,34 +47,32 @@ def check_strategy(df):
     df["cross"] = 0
     df.loc[(df["ema20"]>df["ema50"]) & (df["ema20"].shift(1)<=df["ema50"].shift(1)), "cross"]=1
     df.loc[(df["ema20"]<df["ema50"]) & (df["ema20"].shift(1)>=df["ema50"].shift(1)), "cross"]=-1
-
     spot = float(df["Close"].iloc[-1])
-    if spot < float(df["ema200"].iloc[-1]): return None # Price > EMA200
-
+    if spot < float(df["ema200"].iloc[-1]): return None
     win = df.iloc[:-1]
     crosses = win[win["cross"]!=0].tail(3)
     if len(crosses)<2: return None
     last, prev = crosses.iloc[-1], crosses.iloc[-2]
-    if last["cross"]!= -1: return None # Last cross must be Death Cross
-
+    if last["cross"]!= -1: return None
     seg = win.loc[prev.name:last.name]
     if seg.empty or len(seg)<5: return None
     HIGH = float(seg["High"].max())
     LOW = float(seg["Low"].min())
     RANGE = HIGH-LOW
-    if RANGE<=0 or RANGE>HIGH*0.08: return None # Range < 8%
-    if spot <= LOW*1.01: # Spot near Low
+    if RANGE<=0 or RANGE>HIGH*0.08: return None
+    if spot <= LOW*1.01:
         return f"BUY Spot:{spot:.1f} Low:{LOW:.1f} High:{HIGH:.1f} Range:{RANGE:.1f}"
     return None
 
 def background_scanner():
     global results_store, last_scan_time, is_scanning
-    print("--- FINAL STRATEGY SCANNER STARTED ---", flush=True)
+    print("--- FINAL 81 STRATEGY SCANNER STARTED ---", flush=True)
     while True:
         try:
             is_scanning = True
             temp = []
-            chunk_size = 5 # 5 stocks एका वेळी - Rate Limit येणार नाही
+            chunk_size = 5
+            total_batches = (len(FNO_STOCKS)+chunk_size-1)//chunk_size
             for i in range(0, len(FNO_STOCKS), chunk_size):
                 batch = FNO_STOCKS[i:i+chunk_size]
                 batch_data = get_batch_data(batch)
@@ -98,15 +92,18 @@ def background_scanner():
                         sig = check_strategy(df)
                         if sig:
                             clean = sym.replace(".NS","")
-                            temp.append(f"{clean} - {sig}")
-                            print(f"FOUND: {clean} - {sig}", flush=True)
+                            msg = f"{clean} - {sig}"
+                            if msg not in temp:
+                                temp.append(msg)
+                                print(f"FOUND: {msg}", flush=True)
                     except: continue
-                print(f"Batch {i//chunk_size+1}/{(len(FNO_STOCKS)+chunk_size-1)//chunk_size} done, wait 90s", flush=True)
-                time.sleep(90) # Yahoo ला 90 sec gap
-            results_store = temp
-            last_scan_time = get_ist_time() + " IST"
+                results_store = temp.copy()
+                last_scan_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
+                print(f"Batch {i//chunk_size+1}/{total_batches} done - Updated {len(temp)} signals, wait 90s", flush=True)
+                time.sleep(90)
             is_scanning = False
-            print(f"Cycle Done: {len(temp)} signals at {last_scan_time}", flush=True)
+            last_scan_time = get_ist_time() + " IST (Full Done)"
+            print(f"Full Cycle Done: {len(temp)} signals", flush=True)
             time.sleep(600)
         except Exception as e:
             print(f"Crash: {e}, retry 60s", flush=True)
