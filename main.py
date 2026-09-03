@@ -10,9 +10,24 @@ app = Flask(__name__)
 FNO_ALL = ["RELIANCE.NS","TCS.NS","SBIN.NS","BHARTIARTL.NS","LT.NS","AXISBANK.NS","BAJFINANCE.NS","TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","ONGC.NS","JSWSTEEL.NS","GRASIM.NS","HINDALCO.NS","DRREDDY.NS","EICHERMOT.NS","BAJAJ-AUTO.NS","HEROMOTOCO.NS","APOLLOHOSP.NS","DIVISLAB.NS","TRENT.NS","BEL.NS","SHRIRAMFIN.NS","JIOFIN.NS","ETERNAL.NS","MUTHOOTFIN.NS","HAVELLS.NS","DIXON.NS","DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","LODHA.NS","FEDERALBNK.NS","IDFCFIRSTB.NS","PNB.NS","BANKBARODA.NS","AUBANK.NS","CHOLAFIN.NS","M&M.NS","BOSCHLTD.NS","MOTHERSON.NS","TVSMOTOR.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","JINDALSTEL.NS","SAIL.NS","VEDL.NS","PIIND.NS","DEEPAKNTR.NS","LUPIN.NS","ZYDUSLIFE.NS","AUROPHARMA.NS","ALKEM.NS","TORNTPHARM.NS","BIOCON.NS","GLENMARK.NS","MANKIND.NS","INDIGO.NS","IRCTC.NS","NYKAA.NS","PAYTM.NS","POLICYBZR.NS","PERSISTENT.NS","COFORGE.NS","HCLTECH.NS","RECLTD.NS","M&MFIN.NS","MANAPPURAM.NS","ABCAPITAL.NS","BHARATFORG.NS","HAL.NS","BHEL.NS","BPCL.NS","IOC.NS","HINDPETRO.NS","TATACONSUM.NS","SIEMENS.NS","SBICARD.NS","BANDHANBNK.NS"]
 FNO_STOCKS = FNO_ALL
 RESULT_FILE = "results.json"
-
-# तुझा NTFY Topic
 NTFY_TOPIC = "nifty-bot-3757-signal"
+
+# === FIX: एकदाच Signal साठी ===
+SENT_TODAY_DATE = ""
+ALREADY_SENT = set()
+
+def check_already_sent(clean):
+    global SENT_TODAY_DATE, ALREADY_SENT
+    today = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%d-%m-%Y")
+    if SENT_TODAY_DATE!= today:
+        ALREADY_SENT = set()
+        SENT_TODAY_DATE = today
+        print(f"New Day {today} - Cleared Sent List", flush=True)
+    if clean in ALREADY_SENT:
+        return True
+    ALREADY_SENT.add(clean)
+    return False
+# ==============================
 
 def send_ntfy(msg):
     try:
@@ -66,13 +81,6 @@ def save_results(temp, last_time):
 
 def background_scanner():
     print("--- FINAL 81 STRATEGY SCANNER WITH NTFY STARTED ---", flush=True)
-    sent_signals = set()
-    if os.path.exists(RESULT_FILE):
-        try:
-            with open(RESULT_FILE, "r") as f:
-                old = json.load(f).get("signals", [])
-                for s in old: sent_signals.add(s.split(" - ")[0])
-        except: pass
     while True:
         try:
             temp = []
@@ -95,13 +103,13 @@ def background_scanner():
                         sig = check_strategy(df)
                         if sig:
                             clean = sym.replace(".NS","")
+                            if check_already_sent(clean):
+                                continue
                             msg = f"{clean} - {sig}"
-                            if msg not in temp:
+                            if clean not in [s.split(" -")[0] for s in temp]:
                                 temp.append(msg)
                                 print(f"FOUND: {msg}", flush=True)
-                                if clean not in sent_signals:
-                                    send_ntfy(msg)
-                                    sent_signals.add(clean)
+                                send_ntfy(msg)
                     except: continue
                 last_time = get_ist_time() + f" IST (Batch {i//chunk_size+1}/{total_batches})"
                 save_results(temp, last_time)
@@ -127,7 +135,7 @@ def home():
     else:
         signals = []
         last_time = "Not Started - Scanning first batch..."
-    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: SCANNING...</p><p>Last Scan: {last_time}</p><p>Ntfy Topic: {NTFY_TOPIC}</p><p>Strategy: EMA 20/50 Cross + EMA200 + Range 8%</p><hr><h3>Signals:</h3>"
+    html = f"<h2>✅ STRATEGY BOT LIVE - {len(FNO_STOCKS)} Stocks</h2><p>Status: SCANNING...</p><p>Last Scan: {last_time}</p><p>Ntfy Topic: {NTFY_TOPIC}</p><p>One-Time Alert: ON</p><hr><h3>Signals:</h3>"
     if not signals:
         html += "<p>No Signal Now - Scanning...</p>"
     else:
