@@ -1,8 +1,21 @@
+from fastapi import FastAPI
+import yfinance as yf
+import pandas as pd
+import time
+
+# हि ओळ सगळ्यात महत्वाची आहे - हिच्यामुळेच तुझी Error येत होती
+app = FastAPI()
+
+y_session = None # तुझा session असेल तर इथे टाक
+
+@app.get("/")
+def home():
+    return {"status": "Bot is Live - EMA200 Strict Mode ON"}
+
 def get_batch_data(symbols_batch):
     for attempt in range(3):
         try:
             print(f"Checking BATCH {symbols_batch[0]} +{len(symbols_batch)-1} more... Attempt {attempt+1}", flush=True)
-            # बदल 1: 60 दिवसाचा data घेतला EMA 200 साठी
             data = yf.download(tickers=symbols_batch, period="60d", interval="5m", group_by='ticker', auto_adjust=True, threads=False, progress=False, session=y_session)
             return data
         except Exception as e:
@@ -11,7 +24,7 @@ def get_batch_data(symbols_batch):
     return pd.DataFrame()
 
 def check_strategy(df):
-    if len(df) < 250: return None # 200 पेक्षा जास्त candle पाहिजे
+    if len(df) < 250: return None
     df["ema20"] = df["Close"].ewm(span=20).mean()
     df["ema50"] = df["Close"].ewm(span=50).mean()
     df["ema200"] = df["Close"].ewm(span=200).mean()
@@ -21,9 +34,7 @@ def check_strategy(df):
     spot = float(df["Close"].iloc[-1])
     ema200_val = float(df["ema200"].iloc[-1])
 
-    # बदल 2: एकदम Strict Check
     if spot < ema200_val:
-        # print(f"Skip - Below EMA200: Spot {spot} < EMA200 {ema200_val}")
         return None
 
     win = df.iloc[:-1]
